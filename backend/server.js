@@ -1,6 +1,4 @@
-// server.js - COPY THIS TO: backend/server.js
 const express = require('express');
-const mongoose = require('mongoose');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -9,82 +7,77 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(express.json());
 app.use(cors());
+app.use(express.json());
 
-// MongoDB Connection - Using MongoDB Atlas (Cloud)
-mongoose.connect('mongodb+srv://stackit:stackit123@cluster0.mongodb.net/stackoverflow-clone?retryWrites=true&w=majority', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-}).then(() => {
-  console.log('Connected to MongoDB Atlas');
-}).catch(err => {
-  console.error('MongoDB connection error:', err);
-});
+console.log('Using in-memory database - ready to go!');
 
-// User Schema
-const userSchema = new mongoose.Schema({
-  username: { type: String, required: true, unique: true },
-  email: { type: String, required: true, unique: true },
-  password: { type: String, required: true },
-  reputation: { type: Number, default: 0 },
-  avatar: { type: String, default: 'https://via.placeholder.com/40' },
-  createdAt: { type: Date, default: Date.now }
-});
+// In-Memory Database (No MongoDB installation needed)
+const users = [];
+const questions = [];
+const answers = [];
 
-// Question Schema
-const questionSchema = new mongoose.Schema({
-  title: { type: String, required: true },
-  body: { type: String, required: true },
-  tags: [String],
-  author: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-  votes: { type: Number, default: 0 },
-  views: { type: Number, default: 0 },
-  answers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Answer' }],
-  createdAt: { type: Date, default: Date.now }
-});
+// Helper functions for in-memory database
+const findUser = (query) => users.find(u => u.email === query.email || u._id === query._id);
+const findQuestion = (id) => questions.find(q => q._id === id);
+const generateId = () => Date.now().toString() + Math.random().toString(36).substr(2, 9);
 
-// Answer Schema
-const answerSchema = new mongoose.Schema({
-  body: { type: String, required: true },
-  author: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-  question: { type: mongoose.Schema.Types.ObjectId, ref: 'Question' },
-  votes: { type: Number, default: 0 },
-  isAccepted: { type: Boolean, default: false },
-  createdAt: { type: Date, default: Date.now }
-});
+// Auth middleware
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
 
-const User = mongoose.model('User', userSchema);
-const Question = mongoose.model('Question', questionSchema);
-const Answer = mongoose.model('Answer', answerSchema);
-
-// Auth Middleware
-const auth = (req, res, next) => {
-  const token = req.header('Authorization')?.replace('Bearer ', '');
   if (!token) {
-    return res.status(401).json({ message: 'No token, authorization denied' });
+    return res.status(401).json({ message: 'Access token required' });
   }
-  try {
-    const decoded = jwt.verify(token, 'your-secret-key');
-    req.user = decoded;
+
+  jwt.verify(token, 'your-secret-key', (err, user) => {
+    if (err) return res.status(403).json({ message: 'Invalid token' });
+    req.user = user;
     next();
-  } catch (error) {
-    res.status(401).json({ message: 'Token is not valid' });
-  }
+  });
 };
 
 // Routes
+
 // Register
 app.post('/api/auth/register', async (req, res) => {
   try {
     const { username, email, password } = req.body;
+    
+    // Check if user exists
+    if (findUser({ email })) {
+      return res.status(400).json({ message: 'User already exists' });
+    }
+
+    // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
-    const user = new User({ username, email, password: hashedPassword });
-    await user.save();
-    const token = jwt.sign({ userId: user._id }, 'your-secret-key');
-    res.status(201).json({ token, user: { id: user._id, username, email } });
+    
+    // Create user
+    const user = {
+      _id: generateId(),
+      username,
+      email,
+      password: hashedPassword,
+      createdAt: new Date()
+    };
+    
+    users.push(user);
+    
+    // Create token
+    const token = jwt.sign(
+      { userId: user._id, email: user.email },
+      'your-secret-key',
+      { expiresIn: '24h' }
+    );
+    
+    res.status(201).json({
+      message: 'User registered successfully',
+      token,
+      user: { _id: user._id, username: user.username, email: user.email }
+    });
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 
@@ -92,104 +85,222 @@ app.post('/api/auth/register', async (req, res) => {
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-    const user = await User.findOne({ email });
+    const user = findUser({ email });
+    
     if (!user || !await bcrypt.compare(password, user.password)) {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
-    const token = jwt.sign({ userId: user._id }, 'your-secret-key');
-    res.json({ token, user: { id: user._id, username: user.username, email } });
+    
+    const token = jwt.sign(
+      { userId: user._id, email: user.email },
+      'your-secret-key',
+      { expiresIn: '24h' }
+    );
+    
+    res.json({
+      message: 'Login successful',
+      token,
+      user: { _id: user._id, username: user.username, email: user.email }
+    });
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 
 // Get Questions
 app.get('/api/questions', async (req, res) => {
   try {
-    const questions = await Question.find()
-      .populate('author', 'username avatar reputation')
-      .sort({ createdAt: -1 });
-    res.json(questions);
+    const questionsWithAuthors = questions.map(q => ({
+      ...q,
+      author: users.find(u => u._id === q.author)
+    }));
+    res.json(questionsWithAuthors);
   } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-// Get Question by ID
-app.get('/api/questions/:id', async (req, res) => {
-  try {
-    const question = await Question.findById(req.params.id)
-      .populate('author', 'username avatar reputation')
-      .populate({
-        path: 'answers',
-        populate: { path: 'author', select: 'username avatar reputation' }
-      });
-    if (!question) {
-      return res.status(404).json({ message: 'Question not found' });
-    }
-    // Increment views
-    question.views += 1;
-    await question.save();
-    res.json(question);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 
 // Create Question
-app.post('/api/questions', auth, async (req, res) => {
+app.post('/api/questions', authenticateToken, async (req, res) => {
   try {
-    const { title, body, tags } = req.body;
-    const question = new Question({
+    const { title, content, tags } = req.body;
+    
+    const question = {
+      _id: generateId(),
       title,
-      body,
-      tags: tags.split(',').map(tag => tag.trim()),
-      author: req.user.userId
+      content,
+      tags: tags || [],
+      author: req.user.userId,
+      votes: 0,
+      answers: [],
+      createdAt: new Date()
+    };
+    
+    questions.push(question);
+    
+    res.status(201).json({
+      message: 'Question created successfully',
+      question: {
+        ...question,
+        author: users.find(u => u._id === question.author)
+      }
     });
-    await question.save();
-    await question.populate('author', 'username avatar reputation');
-    res.status(201).json(question);
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 
-// Create Answer
-app.post('/api/questions/:id/answers', auth, async (req, res) => {
+// Get Single Question
+app.get('/api/questions/:id', async (req, res) => {
   try {
-    const { body } = req.body;
-    const answer = new Answer({
-      body,
-      author: req.user.userId,
-      question: req.params.id
-    });
-    await answer.save();
-    await answer.populate('author', 'username avatar reputation');
+    const question = findQuestion(req.params.id);
+    if (!question) {
+      return res.status(404).json({ message: 'Question not found' });
+    }
     
-    // Add answer to question
-    await Question.findByIdAndUpdate(req.params.id, {
-      $push: { answers: answer._id }
-    });
+    const questionWithAuthor = {
+      ...question,
+      author: users.find(u => u._id === question.author)
+    };
     
-    res.status(201).json(answer);
+    res.json(questionWithAuthor);
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 
 // Vote on Question
-app.post('/api/questions/:id/vote', auth, async (req, res) => {
+app.post('/api/questions/:id/vote', authenticateToken, async (req, res) => {
   try {
-    const { voteType } = req.body; // 'up' or 'down'
-    const question = await Question.findById(req.params.id);
-    question.votes += voteType === 'up' ? 1 : -1;
-    await question.save();
-    res.json({ votes: question.votes });
+    const { vote } = req.body; // 1 for upvote, -1 for downvote
+    const question = findQuestion(req.params.id);
+    
+    if (!question) {
+      return res.status(404).json({ message: 'Question not found' });
+    }
+    
+    question.votes += vote;
+    
+    res.json({ message: 'Vote recorded', votes: question.votes });
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 
+// Add Answer
+app.post('/api/questions/:id/answers', authenticateToken, async (req, res) => {
+  try {
+    const { content } = req.body;
+    const question = findQuestion(req.params.id);
+    
+    if (!question) {
+      return res.status(404).json({ message: 'Question not found' });
+    }
+    
+    const answer = {
+      _id: generateId(),
+      content,
+      author: req.user.userId,
+      votes: 0,
+      createdAt: new Date()
+    };
+    
+    question.answers.push(answer);
+    answers.push(answer);
+    
+    res.status(201).json({
+      message: 'Answer added successfully',
+      answer: {
+        ...answer,
+        author: users.find(u => u._id === answer.author)
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Get User Profile
+app.get('/api/users/profile', authenticateToken, async (req, res) => {
+  try {
+    const user = findUser({ _id: req.user.userId });
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    
+    res.json({
+      _id: user._id,
+      username: user.username,
+      email: user.email,
+      createdAt: user.createdAt
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Search Questions
+app.get('/api/search', async (req, res) => {
+  try {
+    const { q } = req.query;
+    if (!q) {
+      return res.json([]);
+    }
+    
+    const searchResults = questions.filter(question => 
+      question.title.toLowerCase().includes(q.toLowerCase()) ||
+      question.content.toLowerCase().includes(q.toLowerCase()) ||
+      question.tags.some(tag => tag.toLowerCase().includes(q.toLowerCase()))
+    );
+    
+    const resultsWithAuthors = searchResults.map(q => ({
+      ...q,
+      author: users.find(u => u._id === q.author)
+    }));
+    
+    res.json(resultsWithAuthors);
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Health check
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    message: 'StackIt Forum API is running!',
+    database: 'In-Memory',
+    users: users.length,
+    questions: questions.length,
+    answers: answers.length
+  });
+});
+
+// Default route
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'StackIt Forum API',
+    version: '1.0.0',
+    endpoints: [
+      'POST /api/auth/register',
+      'POST /api/auth/login',
+      'GET /api/questions',
+      'POST /api/questions',
+      'GET /api/questions/:id',
+      'POST /api/questions/:id/vote',
+      'POST /api/questions/:id/answers',
+      'GET /api/users/profile',
+      'GET /api/search?q=query',
+      'GET /api/health'
+    ]
+  });
+});
+
+// Start server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  console.log(`API URL: http://localhost:${PORT}`);
+  console.log(`Health check: http://localhost:${PORT}/api/health`);
 });
+
+module.exports = app;
