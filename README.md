@@ -99,7 +99,7 @@ Vercel + Render
 
 ---
 
-# Database Design (35% Weight)
+# Database Design
 
 ### Core Collections:
 
@@ -130,7 +130,7 @@ Vercel + Render
 
 ---
 
-# Coding Standards Focus (40% Weight)
+# Coding Standards Focus
 
 ### Data Validation:
 
@@ -151,7 +151,7 @@ Vercel + Render
 
 ---
 
-# UI/UX Design (15% Weight)
+# UI/UX Design
 
 ### Responsive Design:
 
