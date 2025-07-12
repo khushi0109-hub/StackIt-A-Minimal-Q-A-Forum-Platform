@@ -1,1 +1,0 @@
-# tackit-qa-forum
