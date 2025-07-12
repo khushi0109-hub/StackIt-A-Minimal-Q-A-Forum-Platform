@@ -1,0 +1,14 @@
+STACKIT BACKEND API ENDPOINTS
+Base URL: http://localhost:5000
+Endpoints:
+POST /api/auth/register - Register a new user
+POST /api/auth/login - Login with email and password
+GET /api/questions - Get all questions
+POST /api/questions - Create a new question (auth required)
+GET /api/questions/:id - Get a single question by ID
+POST /api/questions/:id/vote - Vote on a question (auth required)
+POST /api/questions/:id/answers - Post an answer to a question (auth required)
+GET /api/users/profile - Get logged-in user's profile
+GET /api/search?q=query - Search for questions by keyword
+GET /api/health - Health check
+GET / - Root endpoint (API info)
