@@ -204,6 +204,8 @@ function App() {
       return;
     }
     
+    console.log('Voting:', { questionId, voteType });
+    
     try {
       const token = localStorage.getItem('token');
       const response = await fetch(`${API_BASE_URL}/questions/${questionId}/vote`, {
@@ -215,10 +217,15 @@ function App() {
         body: JSON.stringify({ voteType })
       });
 
+      console.log('Vote response status:', response.status);
+      
       if (response.ok) {
+        const result = await response.json();
+        console.log('Vote result:', result);
         fetchQuestions();
       } else {
-        console.error('Vote failed:', response.status);
+        const errorData = await response.json();
+        console.error('Vote failed:', response.status, errorData);
       }
     } catch (error) {
       console.error('Error voting:', error);
@@ -233,7 +240,22 @@ function App() {
 
   const renderQuestionAuthor = (question) => {
     if (!question) return 'Unknown';
-    return String(question.username || question.author || 'Unknown');
+    
+    // Handle different author field structures
+    if (question.username) {
+      return String(question.username);
+    }
+    
+    if (question.author) {
+      // If author is an object, try to get username or email from it
+      if (typeof question.author === 'object' && question.author !== null) {
+        return String(question.author.username || question.author.email || question.author.name || 'Unknown');
+      }
+      // If author is a string, return it
+      return String(question.author);
+    }
+    
+    return 'Unknown';
   };
 
   const renderTag = (tag) => {
@@ -417,24 +439,66 @@ function App() {
                   return null;
                 }
                 
+                // Debug the author structure
+                console.log('Question author:', question.author);
+                console.log('Question votes - upvotes:', question.upvotes, 'downvotes:', question.downvotes);
+                console.log('Full question object:', question);
+                console.log('Question object keys:', Object.keys(question));
+                
                 const questionId = question.id || question._id;
-                const upvotes = Number(question.upvotes) || 0;
-                const downvotes = Number(question.downvotes) || 0;
+                
+                // More robust vote counting
+                let upvotes = 0;
+                let downvotes = 0;
+                
+                if (question.upvotes !== undefined) {
+                  upvotes = Number(question.upvotes) || 0;
+                }
+                if (question.downvotes !== undefined) {
+                  downvotes = Number(question.downvotes) || 0;
+                }
+                
+                // Check if there's a votes array or other vote structure
+                if (question.votes) {
+                  console.log('Question votes array/object:', question.votes);
+                  if (Array.isArray(question.votes)) {
+                    upvotes = question.votes.filter(vote => vote.type === 'upvote').length;
+                    downvotes = question.votes.filter(vote => vote.type === 'downvote').length;
+                  } else if (typeof question.votes === 'object') {
+                    upvotes = question.votes.upvotes || question.votes.up || 0;
+                    downvotes = question.votes.downvotes || question.votes.down || 0;
+                  }
+                }
+                
                 const voteCount = upvotes - downvotes;
+                
+                console.log('Final vote calculation:', { upvotes, downvotes, voteCount });
                 
                 return (
                   <div key={questionId || `question-${index}`} className="question-card">
                     <div className="question-votes">
                       <button 
-                        onClick={() => handleVote(questionId, 'upvote')}
+                        onClick={() => {
+                          console.log('Upvote clicked for question:', questionId);
+                          handleVote(questionId, 'upvote');
+                        }}
                         className="vote-btn upvote"
+                        style={{ backgroundColor: loading ? '#ccc' : undefined }}
+                        disabled={loading}
                       >
                         ▲
                       </button>
-                      <span className="vote-count">{voteCount}</span>
+                      <span className="vote-count" title={`${upvotes} upvotes, ${downvotes} downvotes`}>
+                        {voteCount}
+                      </span>
                       <button 
-                        onClick={() => handleVote(questionId, 'downvote')}
+                        onClick={() => {
+                          console.log('Downvote clicked for question:', questionId);
+                          handleVote(questionId, 'downvote');
+                        }}
                         className="vote-btn downvote"
+                        style={{ backgroundColor: loading ? '#ccc' : undefined }}
+                        disabled={loading}
                       >
                         ▼
                       </button>
